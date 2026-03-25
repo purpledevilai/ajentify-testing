@@ -40,8 +40,6 @@ class TargetContext:
         agent_id: The Ajentify agent ID of the agent under test.
         prompt_args: Optional prompt_args dict passed to context creation.
         user_defined: Optional user_defined dict passed to context creation.
-        invoke_on_create: If True, invoke the agent immediately on context creation
-            so it produces a greeting message.
     """
 
     def __init__(
@@ -50,29 +48,27 @@ class TargetContext:
         agent_id: str,
         prompt_args: Optional[dict] = None,
         user_defined: Optional[dict] = None,
-        invoke_on_create: bool = True,
     ):
         self.session = session
         self.client = session.client
 
         ctx = self.client.create_context(
             agent_id=agent_id,
-            invoke_agent_message=invoke_on_create,
+            invoke_agent_message=True,
             prompt_args=prompt_args,
             user_defined=user_defined,
         )
         self.context_id: str = ctx["context_id"]
 
+        # If the agent has agent_speaks_first=True, the greeting will be
+        # in the context creation response. We don't force a second invoke —
+        # agent_speaks_first and invoke_agent_message work together to handle this.
         self.greeting: str = ""
-        if invoke_on_create and ctx.get("messages"):
+        if ctx.get("messages"):
             for m in ctx["messages"]:
                 if (m.get("sender") or m.get("type")) == "ai":
                     self.greeting = m.get("message", "")
                     break
-
-        if invoke_on_create and not self.greeting:
-            invoke_resp = self.client.invoke(self.context_id)
-            self.greeting = invoke_resp.get("response", "")
 
         self.messages: list[dict] = []
         self.turn_count: int = 0

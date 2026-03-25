@@ -5,6 +5,19 @@ from dotenv import load_dotenv
 from ajentify_testing.client import AjentifyClient
 
 
+# ── Prompt templates ────────────────────────────────────────────
+
+END_TEST_TOOL_DESCRIPTION = (
+    "Call this tool when the assistant has given you a clear, complete answer "
+    "to your question, OR when the conversation has reached a natural conclusion. "
+    "Provide a summary of what happened."
+)
+
+END_TEST_SUMMARY_PARAM_DESCRIPTION = (
+    "A brief summary of the conversation: what was discussed, "
+    "what actions the assistant took, and any notable observations."
+)
+
 BOOLEAN_ASSESSOR_PROMPT = """You are a strict test evaluator. You will receive a conversation transcript and a statement to evaluate.
 
 Conversation Transcript:
@@ -44,14 +57,13 @@ class TestSession:
     """
 
     def __init__(self, env_path: str | None = None):
-        if env_path:
-            load_dotenv(env_path)
-        else:
-            candidates = [Path.cwd() / ".env", Path(__file__).resolve().parent.parent / ".env"]
-            for candidate in candidates:
-                if candidate.exists():
-                    load_dotenv(candidate)
-                    break
+        path = Path(env_path) if env_path else Path.cwd() / ".env"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Environment file not found at {path}. "
+                f"Copy .env.example to .env and fill in your credentials."
+            )
+        load_dotenv(path)
 
         self.base_url = os.environ["AJENTIFY_BASE_URL"]
         self.api_key = os.environ["AJENTIFY_API_KEY"]
@@ -95,10 +107,7 @@ class TestSession:
         pd = self.client.create_pd(parameters=[
             {
                 "name": "summary",
-                "description": (
-                    "A brief summary of the conversation: what was discussed, "
-                    "what actions the assistant took, and any notable observations."
-                ),
+                "description": END_TEST_SUMMARY_PARAM_DESCRIPTION,
                 "type": "string",
             },
         ])
@@ -106,11 +115,7 @@ class TestSession:
 
         tool = self.client.create_tool(
             name="end_test",
-            description=(
-                "Call this tool when the assistant has given you a clear, complete answer "
-                "to your question, OR when the conversation has reached a natural conclusion. "
-                "Provide a summary of what happened."
-            ),
+            description=END_TEST_TOOL_DESCRIPTION,
             pd_id=pd["pd_id"],
             is_client_side_tool=True,
         )
