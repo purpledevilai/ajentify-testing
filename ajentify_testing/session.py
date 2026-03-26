@@ -40,7 +40,7 @@ class TestSession:
             )
         load_dotenv(path)
 
-        self.base_url = os.environ["AJENTIFY_BASE_URL"]
+        self.base_url = "https://api.ajentify.com"
         self.api_key = os.environ["AJENTIFY_API_KEY"]
         self.client = AjentifyClient(self.base_url, self.api_key)
 

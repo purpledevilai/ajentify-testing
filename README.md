@@ -208,7 +208,6 @@ Results are printed to the console and saved as a markdown report in `results/`.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `AJENTIFY_BASE_URL` | Yes | Ajentify API base URL |
 | `AJENTIFY_API_KEY` | Yes | Your Ajentify API key |
 | `AGENT_ID` | No | Default agent ID (read via `session.env("AGENT_ID")`) |
 
