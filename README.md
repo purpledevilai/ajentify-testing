@@ -4,16 +4,23 @@ Test any Ajentify agent with simulated conversations, deterministic assertions, 
 
 ## Quick Start
 
+Clone the testing framework into your project's root directory:
+
 ```bash
-# 1. Clone and install
+cd your-project/
+git clone https://github.com/purpledevilai/ajentify-testing.git
 cd ajentify-testing
 pip install -r requirements.txt
+```
 
-# 2. Configure
+This gives you an `ajentify-testing/` folder with the framework, tests directory, and runner — all self-contained alongside your project code.
+
+```bash
+# Configure
 cp .env.example .env
 # Edit .env with your Ajentify credentials and target agent ID
 
-# 3. Run tests
+# Run tests
 python run_tests.py
 ```
 
@@ -82,7 +89,7 @@ def run(session):
     # Deterministic assertions
     target.assert_called_tool("lookup_property")
     target.assert_called_tool("lookup_property", with_params={"suburb": "Richmond"})
-    target.assert_turn_count(max=10)
+    target.assert_message_contains("Hi, thank you for choosing NewLiving Realestate")
 
     # LLM-powered assessments (raise on first failure)
     target.assess_true("Gave the user a price guide")
