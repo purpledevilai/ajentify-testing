@@ -160,5 +160,11 @@ class AjentifyClient:
     def run_sre(self, sre_id: str, args: dict) -> dict:
         return self._post(f"/run-sre/{sre_id}", args)
 
+    def run_sre_inline(self, prompt: str, parameters: list[dict], model: str | None = None) -> dict:
+        body: dict = {"prompt": prompt, "parameters": parameters}
+        if model:
+            body["model"] = model
+        return self._post("/run-sre", body)
+
     def delete_sre(self, sre_id: str) -> dict:
         return self._delete(f"/sre/{sre_id}")

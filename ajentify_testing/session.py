@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from ajentify_testing.client import AjentifyClient
 
 
-# ── Prompt templates ────────────────────────────────────────────
+# ── Prompt constants ─────────────────────────────────────────────
 
 END_TEST_TOOL_DESCRIPTION = (
     "Call this tool when the assistant has given you a clear, complete answer "
@@ -18,40 +18,15 @@ END_TEST_SUMMARY_PARAM_DESCRIPTION = (
     "what actions the assistant took, and any notable observations."
 )
 
-BOOLEAN_ASSESSOR_PROMPT = """You are a strict test evaluator. You will receive a conversation transcript and a statement to evaluate.
-
-Conversation Transcript:
-{conversation}
-
-Statement to evaluate:
-{statement}
-
-Determine whether the statement is TRUE or FALSE based solely on evidence in the conversation.
-Be strict — only mark as true if the conversation clearly supports it."""
-
-SCORE_ASSESSOR_PROMPT = """You are a strict test evaluator. You will receive a conversation transcript and criteria to score.
-
-Conversation Transcript:
-{conversation}
-
-Criteria to score:
-{criteria}
-
-Rate how well the criteria was met on a scale of 0.0 to 1.0, where:
-- 0.0 = not met at all
-- 0.5 = partially met
-- 1.0 = fully and excellently met
-
-Be strict and justify your score."""
-
 
 class TestSession:
     """Manages shared Ajentify resources for a test run.
 
     Creates once-per-session:
       - end_test client-side tool (SimAgents use this to signal conversation end)
-      - Boolean assessor SRE  (powers assess_true / assess_false)
-      - Score assessor SRE    (powers assess_score)
+
+    Assessments (assess_true, assess_false, assess_score) use the inline
+    SRE endpoint directly — no pre-created SREs or PDs needed.
 
     All resources are tracked and torn down on cleanup().
     """
@@ -74,8 +49,6 @@ class TestSession:
         self._targets_lock = threading.Lock()
 
         self.end_test_tool_id: str = ""
-        self.boolean_sre_id: str = ""
-        self.score_sre_id: str = ""
 
         self._setup()
 
@@ -95,12 +68,8 @@ class TestSession:
         print("Setting up test session...")
 
         self._create_end_test_tool()
-        self._create_boolean_assessor()
-        self._create_score_assessor()
 
-        print(f"  end_test tool:      {self.end_test_tool_id}")
-        print(f"  boolean assessor:   {self.boolean_sre_id}")
-        print(f"  score assessor:     {self.score_sre_id}")
+        print(f"  end_test tool: {self.end_test_tool_id}")
         print("Session ready.\n")
 
     def _create_end_test_tool(self):
@@ -121,38 +90,6 @@ class TestSession:
         )
         self.end_test_tool_id = tool["tool_id"]
         self._track("tool", self.end_test_tool_id)
-
-    def _create_boolean_assessor(self):
-        pd = self.client.create_pd(parameters=[
-            {"name": "result", "description": "Whether the statement is true", "type": "boolean"},
-            {"name": "reasoning", "description": "Explanation of why the statement is true or false", "type": "string"},
-        ])
-        self._track("pd", pd["pd_id"])
-
-        sre = self.client.create_sre(
-            name="ajentify_testing_boolean_assessor",
-            description="Evaluates whether a statement is true about a conversation",
-            pd_id=pd["pd_id"],
-            prompt_template=BOOLEAN_ASSESSOR_PROMPT,
-        )
-        self.boolean_sre_id = sre["sre_id"]
-        self._track("sre", self.boolean_sre_id)
-
-    def _create_score_assessor(self):
-        pd = self.client.create_pd(parameters=[
-            {"name": "score", "description": "Score from 0.0 to 1.0", "type": "number"},
-            {"name": "reasoning", "description": "Explanation of the score", "type": "string"},
-        ])
-        self._track("pd", pd["pd_id"])
-
-        sre = self.client.create_sre(
-            name="ajentify_testing_score_assessor",
-            description="Scores how well criteria was met in a conversation",
-            pd_id=pd["pd_id"],
-            prompt_template=SCORE_ASSESSOR_PROMPT,
-        )
-        self.score_sre_id = sre["sre_id"]
-        self._track("sre", self.score_sre_id)
 
     # ── Per-test target tracking (used by the runner) ──────────
 
@@ -183,7 +120,6 @@ class TestSession:
     def cleanup(self):
         print("\nCleaning up test session...")
         deleters = {
-            "sre": self.client.delete_sre,
             "tool": self.client.delete_tool,
             "pd": self.client.delete_pd,
         }

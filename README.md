@@ -36,7 +36,7 @@ sim = SimAgent(
 A wrapper around your agent's Ajentify context. Exposes two families of checks:
 
 - **`assert_*()`** — Deterministic, instant, zero-cost. Inspects the conversation data directly.
-- **`assess_*()`** — LLM-powered via SRE. Handles subjective/semantic checks.
+- **`assess_*()`** — LLM-powered via inline SRE. Handles subjective/semantic checks.
 
 ```python
 target = TargetContext(
@@ -84,13 +84,74 @@ def run(session):
     target.assert_called_tool("lookup_property", with_params={"suburb": "Richmond"})
     target.assert_turn_count(max=10)
 
-    # LLM-powered assessments
+    # LLM-powered assessments (raise on first failure)
     target.assess_true("Gave the user a price guide")
     target.assess_false("Offered a private inspection without being asked")
     target.assess_score("Followed professional sales approach", min=0.7)
 ```
 
 Resource cleanup is handled automatically by the framework. SimAgents and TargetContexts are cleaned up after each test, even if assertions fail.
+
+## Batch Assessments with assess_all
+
+Individual `assess_*` calls raise on the first failure. Use `assess_all` to run every assessment and collect all results before failing:
+
+```python
+from ajentify_testing import AssessTrue, AssessFalse, AssessScore
+
+target.assess_all([
+    AssessTrue("Greeted the user by name"),
+    AssessTrue("Provided a price guide"),
+    AssessFalse("Offered a private inspection without being asked"),
+    AssessScore("Followed professional sales approach", min=0.7),
+])
+```
+
+If any assessment fails, `assess_all` raises a single `AssessmentFailed` with a summary of all failures — giving you the full picture in one test run.
+
+## Structured Extraction with extract
+
+Use `extract` for ad-hoc structured data extraction from the conversation, powered by the inline SRE endpoint:
+
+```python
+from ajentify_testing import Param
+
+result = target.extract([
+    Param.boolean("passed", "Whether the agent completed the task"),
+    Param.number("score", "Quality score from 0.0 to 1.0"),
+    Param.string("summary", "Brief summary of what happened"),
+])
+
+if result["passed"]:
+    print(f"Score: {result['score']}")
+```
+
+You can provide a custom prompt (use `{conversation}` as a placeholder for the transcript):
+
+```python
+result = target.extract(
+    [Param.string("bin_color", "The bin color the agent recommended")],
+    prompt="What bin color did the agent recommend?\n\n{conversation}",
+)
+```
+
+## Param Helper
+
+Build parameter definitions without writing dicts by hand:
+
+```python
+from ajentify_testing import Param
+
+Param.string("name", "Person's name")
+Param.number("score", "Quality score")
+Param.boolean("passed", "Whether it passed")
+Param.array("topics", "Key topics", items=Param.string("topic", "A topic"))
+Param.object("person", "A person", children=[
+    Param.string("name", "Name"),
+    Param.number("age", "Age"),
+])
+Param.enum("sentiment", "Sentiment", values=["positive", "negative", "neutral"])
+```
 
 ## Assertion Reference
 
@@ -111,7 +172,15 @@ Resource cleanup is handled automatically by the framework. SimAgents and Target
 |--------|-------------|
 | `assess_true(statement)` | Statement is true about the conversation |
 | `assess_false(statement)` | Statement is false about the conversation |
-| `assess_score(criteria, min=0.7)` | Score (0.0–1.0) meets minimum threshold |
+| `assess_score(criteria, min=0.7)` | Score (0.0-1.0) meets minimum threshold |
+| `assess_all([...])` | Run multiple assessments, collect all results before failing |
+
+### extract
+
+| Method | Description |
+|--------|-------------|
+| `extract(parameters)` | Extract structured data from the conversation |
+| `extract(parameters, prompt=...)` | Extract with a custom prompt (use `{conversation}`) |
 
 ## Running Tests
 
@@ -145,11 +214,12 @@ ajentify-testing/
   ajentify_testing/        # Framework package
     __init__.py            # Public API
     client.py              # Ajentify HTTP client
-    session.py             # TestSession (shared SREs, end_test tool)
+    session.py             # TestSession (end_test tool, config)
     sim_agent.py           # SimAgent
-    target_context.py      # TargetContext with assert_*/assess_*
+    target_context.py      # TargetContext with assert_*/assess_*/extract
     conversation.py        # run_conversation()
     models.py              # TestResult, CheckResult
+    params.py              # Param helper for parameter definitions
     exceptions.py          # AssertionFailed, AssessmentFailed
     runner.py              # Discovery, parallel execution, reporting
   tests/                   # Your test files
