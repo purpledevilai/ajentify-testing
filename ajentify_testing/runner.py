@@ -137,7 +137,7 @@ def build_summary(results: list[TestResult]) -> str:
 
     for r in results:
         status = "PASS" if r.passed else "FAIL"
-        error = r.error[:60] if r.error else ""
+        error = r.error or ""
         lines.append(f"{r.test_name:<{name_w}} {status:>6}  {r.elapsed_seconds:>5.1f}s  {error}")
 
     passed = sum(1 for r in results if r.passed)
@@ -179,7 +179,11 @@ def save_results(results: list[TestResult], results_dir: Path | None = None) -> 
         checks_passed = sum(1 for c in r.checks if c.status == CheckStatus.PASSED)
         checks_total = len(r.checks)
         checks_str = f"{checks_passed}/{checks_total}" if checks_total else "-"
-        error = r.error[:80] if r.error else ""
+        error_raw = r.error or ""
+        error_line = error_raw.split("\n")[0]
+        if len(error_line) > 80:
+            error_line = error_line[:77] + "..."
+        error = error_line.replace("|", "\\|")
         md.append(f"| {r.test_name} | {status} | {r.elapsed_seconds:.1f}s | {checks_str} | {error} |")
     md.append("")
 
