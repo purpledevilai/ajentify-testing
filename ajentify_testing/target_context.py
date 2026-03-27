@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, TYPE_CHECKING
 
 from ajentify_testing.models import CheckResult, CheckType, CheckStatus
-from ajentify_testing.exceptions import AssertionFailed, AssessmentFailed
+from ajentify_testing.exceptions import AssertionFailed, AssessmentFailed, TestFailure
 from ajentify_testing.params import Param
 
 if TYPE_CHECKING:
@@ -41,6 +41,18 @@ EXTRACT_PROMPT_TEMPLATE = (
     "Conversation Transcript:\n{conversation}"
 )
 
+ASSESS_ALL_PROMPT_TEMPLATE = (
+    "You are a strict test evaluator. Evaluate each assertion below against the "
+    "conversation transcript. For every assertion return whether it passed and your reasoning.\n\n"
+    "Rules:\n"
+    "- Base every judgment solely on evidence present in the transcript.\n"
+    "- For TRUE assertions: only pass if the transcript clearly supports the statement.\n"
+    "- For FALSE assertions: only pass if the transcript clearly does NOT support the statement.\n"
+    "- For SCORE assertions: only pass if the quality clearly meets or exceeds the threshold.\n\n"
+    "Assertions:\n{assertions}\n\n"
+    "Conversation Transcript:\n{conversation}"
+)
+
 BOOLEAN_PARAMS = [
     Param.boolean("result", "Whether the statement is true"),
     Param.string("reasoning", "Explanation of why the statement is true or false"),
@@ -52,22 +64,54 @@ SCORE_PARAMS = [
 ]
 
 
-# ── Assessment descriptor classes ────────────────────────────────
+# ── Check descriptor classes (for check_all) ─────────────────────
+
+class AssertCalledTool:
+    """Descriptor for check_all: agent called a specific tool."""
+    def __init__(self, tool_name: str, with_params: dict | None = None):
+        self.tool_name = tool_name
+        self.with_params = with_params
+
+
+class AssertNotCalledTool:
+    """Descriptor for check_all: agent did NOT call a specific tool."""
+    def __init__(self, tool_name: str):
+        self.tool_name = tool_name
+
+
+class AssertMessageContains:
+    """Descriptor for check_all: at least one agent message contains text."""
+    def __init__(self, substring: str):
+        self.substring = substring
+
+
+class AssertMessageNotContains:
+    """Descriptor for check_all: no agent message contains text."""
+    def __init__(self, substring: str):
+        self.substring = substring
+
+
+class AssertTurnCount:
+    """Descriptor for check_all: conversation turn count within bounds."""
+    def __init__(self, *, min: int | None = None, max: int | None = None):
+        self.min = min
+        self.max = max
+
 
 class AssessTrue:
-    """Descriptor for assess_all: statement should be true."""
+    """Descriptor for check_all: statement should be true (LLM-powered)."""
     def __init__(self, statement: str):
         self.statement = statement
 
 
 class AssessFalse:
-    """Descriptor for assess_all: statement should be false."""
+    """Descriptor for check_all: statement should be false (LLM-powered)."""
     def __init__(self, statement: str):
         self.statement = statement
 
 
 class AssessScore:
-    """Descriptor for assess_all: criteria should meet a minimum score."""
+    """Descriptor for check_all: criteria should meet a minimum score (LLM-powered)."""
     def __init__(self, criteria: str, *, min: float = 0.0):
         self.criteria = criteria
         self.min = min
@@ -102,7 +146,7 @@ class TargetContext:
       - load_transcript()        — fetch the full conversation with tool calls
       - assert_*()               — deterministic checks on the transcript
       - assess_*()               — LLM-powered checks via inline SRE
-      - assess_all()             — run multiple assessments, collecting all results
+      - check_all()              — run mixed assert/assess checks, collecting all results
       - extract()                — ad-hoc structured extraction from the conversation
 
     Args:
@@ -416,58 +460,245 @@ class TargetContext:
             reasoning=reasoning, score=score,
         ))
 
-    # ── assess_all (batch assessments, no early exit) ────────────
+    def assess_all(self, checks: list) -> None:
+        """Evaluate all assessments in a single LLM call, collecting all results before failing.
 
-    def assess_all(self, assessments: list[AssessTrue | AssessFalse | AssessScore]):
-        """Run multiple LLM assessments in parallel, collecting all results before failing.
+        Each assertion is returned as an object with a result enum ("PASS"/"FAIL")
+        and a reasoning string:
 
-        Unlike calling assess_true / assess_false / assess_score individually
-        (which raise on the first failure), assess_all fires every assessment
-        concurrently and only raises after all are complete — giving a full picture.
+            {
+                "assertion_1": {"result": "PASS", "reasoning": "..."},
+                "assertion_2": {"result": "FAIL", "reasoning": "..."},
+                ...
+            }
 
         Args:
-            assessments: List of AssessTrue, AssessFalse, or AssessScore descriptors.
+            checks: List of AssessTrue, AssessFalse, or AssessScore descriptors.
 
         Raises:
-            AssessmentFailed: If any assessment in the batch failed, with a
-                summary of all failures.
+            TestFailure: If any assertion failed, with a combined summary.
         """
         self._ensure_transcript()
         conversation_text = self.get_transcript_text()
 
-        def _run(assessment):
-            if isinstance(assessment, AssessTrue):
-                return self._run_boolean_assessment(
-                    conversation_text, assessment.statement, expect_true=True,
-                )
-            elif isinstance(assessment, AssessFalse):
-                return self._run_boolean_assessment(
-                    conversation_text, assessment.statement, expect_true=False,
-                )
-            elif isinstance(assessment, AssessScore):
-                return self._run_score_assessment(
-                    conversation_text, assessment.criteria, min_score=assessment.min,
+        _RESULT_ENUM = [
+            {"name": "PASS", "description": "The assertion passed", "type": "string"},
+            {"name": "FAIL", "description": "The assertion failed", "type": "string"},
+        ]
+
+        assertion_lines: list[str] = []
+        parameters: list[dict] = []
+
+        for i, check in enumerate(checks):
+            n = i + 1
+            if isinstance(check, AssessTrue):
+                line = f"{n}. [TRUE] {check.statement}"
+                obj_desc = f"Evaluation of assertion {n}: passes if TRUE — {check.statement}"
+            elif isinstance(check, AssessFalse):
+                line = f"{n}. [FALSE] {check.statement}"
+                obj_desc = f"Evaluation of assertion {n}: passes if FALSE (does not apply) — {check.statement}"
+            elif isinstance(check, AssessScore):
+                line = f"{n}. [SCORE >= {check.min}] {check.criteria}"
+                obj_desc = f"Evaluation of assertion {n}: passes if quality score >= {check.min} — {check.criteria}"
+            else:
+                raise TypeError(
+                    f"assess_all only accepts AssessTrue, AssessFalse, AssessScore — got {type(check)}"
                 )
 
-        results: list[tuple[CheckResult, str | None]] = []
-        with ThreadPoolExecutor(max_workers=len(assessments)) as executor:
-            futures = {executor.submit(_run, a): i for i, a in enumerate(assessments)}
-            indexed: dict[int, tuple[CheckResult, str | None]] = {}
-            for future in as_completed(futures):
-                idx = futures[future]
-                indexed[idx] = future.result()
-            for i in range(len(assessments)):
-                results.append(indexed[i])
+            assertion_lines.append(line)
+            parameters.append({
+                "name": f"assertion_{n}",
+                "description": obj_desc,
+                "type": "object",
+                "parameters": [
+                    {
+                        "name": "result",
+                        "description": "PASS if the assertion passed, FAIL if it did not",
+                        "type": "enum",
+                        "parameters": _RESULT_ENUM,
+                    },
+                    {
+                        "name": "reasoning",
+                        "description": "Explanation of why this assertion passed or failed",
+                        "type": "string",
+                        "parameters": [],
+                    },
+                ],
+            })
+
+        prompt = ASSESS_ALL_PROMPT_TEMPLATE.format(
+            assertions="\n".join(assertion_lines),
+            conversation=conversation_text,
+        )
+
+        result = self.client.run_sre_inline(prompt, parameters)
 
         failures: list[str] = []
-        for check, failure_msg in results:
-            self.checks.append(check)
+        for i, check in enumerate(checks):
+            n = i + 1
+            assertion_result = result.get(f"assertion_{n}") or {}
+            passed = assertion_result.get("result", "FAIL") == "PASS"
+            reasoning = assertion_result.get("reasoning", "")
+
+            if isinstance(check, AssessTrue):
+                name = f"assess_true({check.statement!r})"
+            elif isinstance(check, AssessFalse):
+                name = f"assess_false({check.statement!r})"
+            else:
+                name = f"assess_score({check.criteria!r}, min={check.min})"
+
+            status = CheckStatus.PASSED if passed else CheckStatus.FAILED
+            self.checks.append(CheckResult(
+                check_type=CheckType.ASSESS,
+                name=name,
+                status=status,
+                reasoning=reasoning,
+            ))
+
+            if not passed:
+                failures.append(f"{name}: {reasoning}")
+
+        if failures:
+            raise TestFailure(f"{len(failures)} assessment(s) failed: {'; '.join(failures)}")
+
+    # ── check_all (batch assert + assess, no early exit) ───────────
+
+    _ASSERT_TYPES = (
+        AssertCalledTool, AssertNotCalledTool,
+        AssertMessageContains, AssertMessageNotContains, AssertTurnCount,
+    )
+    _ASSESS_TYPES = (AssessTrue, AssessFalse, AssessScore)
+
+    def check_all(self, checks: list):
+        """Run a mix of assert and assess checks, collecting all results before failing.
+
+        Deterministic asserts run instantly. LLM-powered assessments run in
+        parallel. No check short-circuits — every check in the list is
+        executed regardless of earlier failures.
+
+        Args:
+            checks: List of descriptor objects — any combination of
+                AssertCalledTool, AssertNotCalledTool, AssertMessageContains,
+                AssertMessageNotContains, AssertTurnCount, AssessTrue,
+                AssessFalse, AssessScore.
+
+        Raises:
+            TestFailure: If any check in the batch failed, with a summary
+                of all failures.
+        """
+        self._ensure_transcript()
+        conversation_text = self.get_transcript_text()
+
+        assert_checks = [(i, c) for i, c in enumerate(checks) if isinstance(c, self._ASSERT_TYPES)]
+        assess_checks = [(i, c) for i, c in enumerate(checks) if isinstance(c, self._ASSESS_TYPES)]
+
+        indexed: dict[int, tuple[CheckResult, str | None]] = {}
+
+        for i, check in assert_checks:
+            indexed[i] = self._run_assert_check(check)
+
+        if assess_checks:
+            with ThreadPoolExecutor(max_workers=len(assess_checks)) as executor:
+                futures = {
+                    executor.submit(self._run_assess_check, c, conversation_text): i
+                    for i, c in assess_checks
+                }
+                for future in as_completed(futures):
+                    idx = futures[future]
+                    indexed[idx] = future.result()
+
+        failures: list[str] = []
+        for i in range(len(checks)):
+            result, failure_msg = indexed[i]
+            self.checks.append(result)
             if failure_msg is not None:
                 failures.append(failure_msg)
 
         if failures:
             summary = "; ".join(failures)
-            raise AssessmentFailed(f"{len(failures)} assessment(s) failed", summary)
+            raise TestFailure(f"{len(failures)} check(s) failed: {summary}")
+
+    def _run_assert_check(self, check) -> tuple[CheckResult, str | None]:
+        """Run a single assert descriptor. Returns (CheckResult, failure_msg | None)."""
+        if isinstance(check, AssertCalledTool):
+            return self._check_called_tool(check.tool_name, check.with_params)
+        elif isinstance(check, AssertNotCalledTool):
+            return self._check_not_called_tool(check.tool_name)
+        elif isinstance(check, AssertMessageContains):
+            return self._check_message_contains(check.substring, expect=True)
+        elif isinstance(check, AssertMessageNotContains):
+            return self._check_message_contains(check.substring, expect=False)
+        elif isinstance(check, AssertTurnCount):
+            return self._check_turn_count(check.min, check.max)
+
+    def _run_assess_check(self, check, conversation_text: str) -> tuple[CheckResult, str | None]:
+        """Run a single assess descriptor. Thread-safe."""
+        if isinstance(check, AssessTrue):
+            return self._run_boolean_assessment(conversation_text, check.statement, expect_true=True)
+        elif isinstance(check, AssessFalse):
+            return self._run_boolean_assessment(conversation_text, check.statement, expect_true=False)
+        elif isinstance(check, AssessScore):
+            return self._run_score_assessment(conversation_text, check.criteria, min_score=check.min)
+
+    def _check_called_tool(self, tool_name: str, with_params: dict | None) -> tuple[CheckResult, str | None]:
+        matching = [
+            m for m in self.messages
+            if (m.get("type") or m.get("sender")) == "tool_call"
+            and m.get("tool_name") == tool_name
+        ]
+        if not matching:
+            name = f"assert_called_tool({tool_name!r})"
+            detail = f"Tool '{tool_name}' was never called"
+            return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.FAILED, detail=detail), detail
+
+        if with_params is not None:
+            name = f"assert_called_tool({tool_name!r}, with_params={with_params!r})"
+            for call in matching:
+                tool_input = call.get("tool_input", {})
+                if all(tool_input.get(k) == v for k, v in with_params.items()):
+                    return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.PASSED), None
+            actual = [c.get("tool_input", {}) for c in matching]
+            detail = f"Tool called but params didn't match. Actual: {actual}"
+            return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.FAILED, detail=detail), detail
+
+        name = f"assert_called_tool({tool_name!r})"
+        return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.PASSED), None
+
+    def _check_not_called_tool(self, tool_name: str) -> tuple[CheckResult, str | None]:
+        name = f"assert_not_called_tool({tool_name!r})"
+        called = any(
+            (m.get("type") or m.get("sender")) == "tool_call" and m.get("tool_name") == tool_name
+            for m in self.messages
+        )
+        if called:
+            detail = f"Tool '{tool_name}' was called when it should not have been"
+            return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.FAILED, detail=detail), detail
+        return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.PASSED), None
+
+    def _check_message_contains(self, substring: str, *, expect: bool) -> tuple[CheckResult, str | None]:
+        kind = "assert_message_contains" if expect else "assert_message_not_contains"
+        name = f"{kind}({substring!r})"
+        lower = substring.lower()
+        found = any(
+            (m.get("type") or m.get("sender")) == "ai"
+            and lower in (m.get("message", "") or "").lower()
+            for m in self.messages
+        )
+        passed = found if expect else not found
+        if not passed:
+            detail = f"No agent message contained '{substring}'" if expect else f"An agent message contained '{substring}' when it should not have"
+            return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.FAILED, detail=detail), detail
+        return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.PASSED), None
+
+    def _check_turn_count(self, min_val: int | None, max_val: int | None) -> tuple[CheckResult, str | None]:
+        name = f"assert_turn_count(min={min_val}, max={max_val})"
+        if min_val is not None and self.turn_count < min_val:
+            detail = f"Turn count {self.turn_count} < minimum {min_val}"
+            return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.FAILED, detail=detail), detail
+        if max_val is not None and self.turn_count > max_val:
+            detail = f"Turn count {self.turn_count} > maximum {max_val}"
+            return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.FAILED, detail=detail), detail
+        return CheckResult(check_type=CheckType.ASSERT, name=name, status=CheckStatus.PASSED), None
 
     def _run_boolean_assessment(
         self, conversation_text: str, statement: str,

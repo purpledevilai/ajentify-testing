@@ -101,7 +101,7 @@ Resource cleanup is handled automatically by the framework. SimAgents and Target
 
 ## Batch Assessments with assess_all
 
-Individual `assess_*` calls raise on the first failure. Use `assess_all` to run every assessment and collect all results before failing:
+Individual `assess_*` calls raise on the first failure and each makes its own LLM call. `assess_all` evaluates every assessment in **one single LLM call**, collects all pass/fail results with reasoning, then raises a combined failure if anything didn't pass:
 
 ```python
 from ajentify_testing import AssessTrue, AssessFalse, AssessScore
@@ -114,7 +114,28 @@ target.assess_all([
 ])
 ```
 
-If any assessment fails, `assess_all` raises a single `AssessmentFailed` with a summary of all failures — giving you the full picture in one test run.
+The prompt lists every assertion with its type and threshold. The LLM returns a structured object per assertion with a `result` (`"PASS"` / `"FAIL"`) and `reasoning`. If any fail, a single `TestFailure` is raised with a combined summary — every assertion runs regardless of earlier failures.
+
+## Mixed Assert + Assess with check_all
+
+When you want to combine deterministic assertions and LLM assessments in one collected batch, use `check_all`. Deterministic checks run instantly; LLM assessments run in parallel. All results are collected before any failure is raised:
+
+```python
+from ajentify_testing import (
+    AssertCalledTool, AssertTurnCount,
+    AssessTrue, AssessFalse, AssessScore,
+)
+
+target.check_all([
+    AssertCalledTool("lookup_property", with_params={"suburb": "Richmond"}),
+    AssertTurnCount(max=10),
+    AssessTrue("Gave the user a price guide"),
+    AssessFalse("Offered a private inspection without being asked"),
+    AssessScore("Followed professional sales approach", min=0.7),
+])
+```
+
+Each `Assert*` descriptor maps to an `assert_*` call; each `Assess*` descriptor maps to an `assess_*` call (run in parallel via `ThreadPoolExecutor`).
 
 ## Structured Extraction with extract
 
@@ -179,8 +200,16 @@ Param.enum("sentiment", "Sentiment", values=["positive", "negative", "neutral"])
 |--------|-------------|
 | `assess_true(statement)` | Statement is true about the conversation |
 | `assess_false(statement)` | Statement is false about the conversation |
-| `assess_score(criteria, min=0.7)` | Score (0.0-1.0) meets minimum threshold |
-| `assess_all([...])` | Run multiple assessments, collect all results before failing |
+| `assess_score(criteria, min=0.7)` | Score (0.0–1.0) meets minimum threshold |
+| `assess_all([...])` | One LLM call evaluates all AssessTrue/False/Score checks, collects all results before failing |
+
+### check_all (Mixed)
+
+| Method | Description |
+|--------|-------------|
+| `check_all([...])` | Mix of Assert* and Assess* descriptors — asserts run instantly, assessments run in parallel, all results collected before failing |
+
+**Descriptors:** `AssertCalledTool`, `AssertNotCalledTool`, `AssertMessageContains`, `AssertMessageNotContains`, `AssertTurnCount`, `AssessTrue`, `AssessFalse`, `AssessScore`
 
 ### extract
 
