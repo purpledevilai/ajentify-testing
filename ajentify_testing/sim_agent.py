@@ -1,21 +1,10 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
+from ajentify_testing import prompts as _prompts
+
 if TYPE_CHECKING:
     from ajentify_testing.session import TestSession
-
-SIM_AGENT_PREAMBLE = (
-    "You are a simulated user in an automated test. Your job is to play the role "
-    "of a real person having a natural conversation with an AI assistant.\n\n"
-    "CRITICAL RULES:\n"
-    "- You are the USER. You ask questions and describe your situation. You do NOT "
-    "act as an assistant.\n"
-    "- NEVER say things like 'How can I help you?' or 'What would you like to know?' "
-    "— those are assistant phrases.\n"
-    "- Once the assistant gives you a clear, complete answer, call the end_test tool "
-    "with a brief summary of the conversation.\n"
-    "- If the assistant asks a clarifying question, respond naturally.\n\n"
-)
 
 
 class SimAgent:
@@ -45,7 +34,7 @@ class SimAgent:
         self.agent_id: str | None = None
         self.context_id: str | None = None
 
-        prompt = SIM_AGENT_PREAMBLE + f"Your persona:\n{persona}\n"
+        prompt = _prompts.SIM_AGENT_PREAMBLE + f"Your persona:\n{persona}\n"
         if first_message:
             prompt += (
                 f"\nYour first message MUST be exactly or very close to:\n"

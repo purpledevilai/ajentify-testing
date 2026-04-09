@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ajentify-testing"
+version = "0.1.0"
+description = "Test any Ajentify agent with simulated conversations, deterministic assertions, and LLM-powered assessments."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Ajentify" },
+]
+keywords = ["ajentify", "testing", "agents", "llm", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "requests",
+    "python-dotenv",
+]
+
+[project.urls]
+Homepage = "https://github.com/purpledevilai/ajentify-testing"
+Repository = "https://github.com/purpledevilai/ajentify-testing"
+
+[project.scripts]
+ajentify-test = "ajentify_testing.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ajentify_testing*"]
+exclude = ["tests*", "results*"]

@@ -18,6 +18,14 @@ from ajentify_testing.exceptions import TestFailure
 
 TESTS_DIR = Path.cwd() / "tests"
 
+
+def _ensure_tests_importable(tests_dir: Path) -> None:
+    """Make sure the tests directory's parent is on sys.path so
+    ``import tests.test_foo`` works when the framework is pip-installed."""
+    parent = str(tests_dir.parent)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
+
 _print_lock = threading.Lock()
 
 
@@ -37,10 +45,13 @@ def discover_tests(tests_dir: Path | None = None) -> dict[str, dict]:
       - run: Callable[[TestSession], None]
     """
     directory = tests_dir or TESTS_DIR
+    _ensure_tests_importable(directory)
     tests: dict[str, dict] = {}
 
+    package_name = directory.name
+
     for test_file in sorted(directory.glob("test_*.py")):
-        module_name = f"tests.{test_file.stem}"
+        module_name = f"{package_name}.{test_file.stem}"
         module = importlib.import_module(module_name)
 
         if not (hasattr(module, "name") and hasattr(module, "run")):

@@ -3,20 +3,7 @@ import threading
 from pathlib import Path
 from dotenv import load_dotenv
 from ajentify_testing.client import AjentifyClient
-
-
-# ── Prompt constants ─────────────────────────────────────────────
-
-END_TEST_TOOL_DESCRIPTION = (
-    "Call this tool when the assistant has given you a clear, complete answer "
-    "to your question, OR when the conversation has reached a natural conclusion. "
-    "Provide a summary of what happened."
-)
-
-END_TEST_SUMMARY_PARAM_DESCRIPTION = (
-    "A brief summary of the conversation: what was discussed, "
-    "what actions the assistant took, and any notable observations."
-)
+from ajentify_testing import prompts as _prompts
 
 
 class TestSession:
@@ -76,7 +63,7 @@ class TestSession:
         pd = self.client.create_pd(parameters=[
             {
                 "name": "summary",
-                "description": END_TEST_SUMMARY_PARAM_DESCRIPTION,
+                "description": _prompts.END_TEST_SUMMARY_PARAM_DESCRIPTION,
                 "type": "string",
             },
         ])
@@ -84,7 +71,7 @@ class TestSession:
 
         tool = self.client.create_tool(
             name="end_test",
-            description=END_TEST_TOOL_DESCRIPTION,
+            description=_prompts.END_TEST_TOOL_DESCRIPTION,
             pd_id=pd["pd_id"],
             is_client_side_tool=True,
         )

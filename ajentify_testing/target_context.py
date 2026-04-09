@@ -6,52 +6,10 @@ from typing import Optional, TYPE_CHECKING
 from ajentify_testing.models import CheckResult, CheckType, CheckStatus
 from ajentify_testing.exceptions import AssertionFailed, AssessmentFailed, TestFailure
 from ajentify_testing.params import Param
+from ajentify_testing import prompts as _prompts
 
 if TYPE_CHECKING:
     from ajentify_testing.session import TestSession
-
-
-# ── Prompt templates for assess_* ────────────────────────────────
-
-BOOLEAN_ASSESSOR_PROMPT = (
-    "You are a strict test evaluator. You will receive a conversation "
-    "transcript and a statement to evaluate.\n\n"
-    "Conversation Transcript:\n{conversation}\n\n"
-    "Statement to evaluate:\n{statement}\n\n"
-    "Determine whether the statement is TRUE or FALSE based solely on "
-    "evidence in the conversation.\n"
-    "Be strict — only mark as true if the conversation clearly supports it."
-)
-
-SCORE_ASSESSOR_PROMPT = (
-    "You are a strict test evaluator. You will receive a conversation "
-    "transcript and criteria to score.\n\n"
-    "Conversation Transcript:\n{conversation}\n\n"
-    "Criteria to score:\n{criteria}\n\n"
-    "Rate how well the criteria was met on a scale of 0.0 to 1.0, where:\n"
-    "- 0.0 = not met at all\n"
-    "- 0.5 = partially met\n"
-    "- 1.0 = fully and excellently met\n\n"
-    "Be strict and justify your score."
-)
-
-EXTRACT_PROMPT_TEMPLATE = (
-    "You are analysing a conversation transcript. Extract the requested "
-    "information based on the output schema provided.\n\n"
-    "Conversation Transcript:\n{conversation}"
-)
-
-ASSESS_ALL_PROMPT_TEMPLATE = (
-    "You are a strict test evaluator. Evaluate each assertion below against the "
-    "conversation transcript. For every assertion return whether it passed and your reasoning.\n\n"
-    "Rules:\n"
-    "- Base every judgment solely on evidence present in the transcript.\n"
-    "- For TRUE assertions: only pass if the transcript clearly supports the statement.\n"
-    "- For FALSE assertions: only pass if the transcript clearly does NOT support the statement.\n"
-    "- For SCORE assertions: only pass if the quality clearly meets or exceeds the threshold.\n\n"
-    "Assertions:\n{assertions}\n\n"
-    "Conversation Transcript:\n{conversation}"
-)
 
 BOOLEAN_PARAMS = [
     Param.boolean("result", "Whether the statement is true"),
@@ -378,7 +336,7 @@ class TargetContext:
         self._ensure_transcript()
         conversation_text = self.get_transcript_text()
 
-        prompt = BOOLEAN_ASSESSOR_PROMPT.format(
+        prompt = _prompts.BOOLEAN_ASSESSOR_PROMPT.format(
             conversation=conversation_text, statement=statement,
         )
         result = self.client.run_sre_inline(prompt, BOOLEAN_PARAMS)
@@ -404,7 +362,7 @@ class TargetContext:
         self._ensure_transcript()
         conversation_text = self.get_transcript_text()
 
-        prompt = BOOLEAN_ASSESSOR_PROMPT.format(
+        prompt = _prompts.BOOLEAN_ASSESSOR_PROMPT.format(
             conversation=conversation_text, statement=statement,
         )
         result = self.client.run_sre_inline(prompt, BOOLEAN_PARAMS)
@@ -435,7 +393,7 @@ class TargetContext:
         self._ensure_transcript()
         conversation_text = self.get_transcript_text()
 
-        prompt = SCORE_ASSESSOR_PROMPT.format(
+        prompt = _prompts.SCORE_ASSESSOR_PROMPT.format(
             conversation=conversation_text, criteria=criteria,
         )
         result = self.client.run_sre_inline(prompt, SCORE_PARAMS)
@@ -526,7 +484,7 @@ class TargetContext:
                 ],
             })
 
-        prompt = ASSESS_ALL_PROMPT_TEMPLATE.format(
+        prompt = _prompts.ASSESS_ALL_PROMPT_TEMPLATE.format(
             assertions="\n".join(assertion_lines),
             conversation=conversation_text,
         )
@@ -705,7 +663,7 @@ class TargetContext:
         *, expect_true: bool,
     ) -> tuple[CheckResult, str | None]:
         """Run a single boolean assessment. Thread-safe (no shared mutation)."""
-        prompt = BOOLEAN_ASSESSOR_PROMPT.format(
+        prompt = _prompts.BOOLEAN_ASSESSOR_PROMPT.format(
             conversation=conversation_text, statement=statement,
         )
         result = self.client.run_sre_inline(prompt, BOOLEAN_PARAMS)
@@ -728,7 +686,7 @@ class TargetContext:
         *, min_score: float,
     ) -> tuple[CheckResult, str | None]:
         """Run a single score assessment. Thread-safe (no shared mutation)."""
-        prompt = SCORE_ASSESSOR_PROMPT.format(
+        prompt = _prompts.SCORE_ASSESSOR_PROMPT.format(
             conversation=conversation_text, criteria=criteria,
         )
         result = self.client.run_sre_inline(prompt, SCORE_PARAMS)
@@ -766,7 +724,7 @@ class TargetContext:
         conversation_text = self.get_transcript_text()
 
         if prompt is None:
-            full_prompt = EXTRACT_PROMPT_TEMPLATE.format(conversation=conversation_text)
+            full_prompt = _prompts.EXTRACT_PROMPT_TEMPLATE.format(conversation=conversation_text)
         else:
             full_prompt = prompt.format(conversation=conversation_text)
 

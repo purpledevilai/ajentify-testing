@@ -2,26 +2,41 @@
 
 Test any Ajentify agent with simulated conversations, deterministic assertions, and LLM-powered assessments.
 
-## Quick Start
-
-Clone the testing framework into your project's root directory:
+## Installation
 
 ```bash
-cd your-project/
-git clone https://github.com/purpledevilai/ajentify-testing.git
-cd ajentify-testing
-pip install -r requirements.txt
+pip install ajentify-testing
 ```
 
-This gives you an `ajentify-testing/` folder with the framework, tests directory, and runner — all self-contained alongside your project code.
+Or install directly from GitHub:
 
 ```bash
-# Configure
-cp .env.example .env
-# Edit .env with your Ajentify credentials and target agent ID
+pip install git+https://github.com/purpledevilai/ajentify-testing.git
+```
+
+## Quick Start
+
+```bash
+# Scaffold a test directory in your project
+cd your-project/
+ajentify-test init
+
+# Configure credentials
+# Edit .env with your Ajentify API key and agent ID
 
 # Run tests
-python run_tests.py
+ajentify-test
+```
+
+`ajentify-test init` creates:
+
+```
+your-project/
+  tests/
+    __init__.py
+    test_example.py      # Example test to get started
+  .env.example           # Credential template
+  .env                   # Your credentials (gitignored)
 ```
 
 ## Core Concepts
@@ -181,6 +196,39 @@ Param.object("person", "A person", children=[
 Param.enum("sentiment", "Sentiment", values=["positive", "negative", "neutral"])
 ```
 
+## Customising Prompts
+
+The framework uses built-in prompts for sim agents, assessors, and extraction. To customise any prompt without modifying the package:
+
+```bash
+ajentify-test init --with-prompts
+```
+
+This creates an `ajentify_prompts.py` in your project root with all the default prompts. Edit any prompt you want to change — delete lines you don't need to override:
+
+```python
+# ajentify_prompts.py
+
+SIM_AGENT_PREAMBLE = (
+    "You are a simulated customer testing our support bot. "
+    "Be realistic and occasionally confused...\n\n"
+)
+
+# Only override what you need — everything else uses built-in defaults
+```
+
+Available prompt overrides:
+
+| Variable | Used by | Purpose |
+|----------|---------|---------|
+| `SIM_AGENT_PREAMBLE` | `SimAgent` | System prompt preamble for simulated users |
+| `BOOLEAN_ASSESSOR_PROMPT` | `assess_true()`, `assess_false()` | Prompt for true/false evaluation |
+| `SCORE_ASSESSOR_PROMPT` | `assess_score()` | Prompt for score evaluation |
+| `EXTRACT_PROMPT_TEMPLATE` | `extract()` | Default extraction prompt |
+| `ASSESS_ALL_PROMPT_TEMPLATE` | `assess_all()` | Batch assessment prompt |
+| `END_TEST_TOOL_DESCRIPTION` | `TestSession` | Description for the end_test tool |
+| `END_TEST_SUMMARY_PARAM_DESCRIPTION` | `TestSession` | Description for the summary parameter |
+
 ## Assertion Reference
 
 ### assert_* (Deterministic)
@@ -222,14 +270,16 @@ Param.enum("sentiment", "Sentiment", values=["positive", "negative", "neutral"])
 
 ```bash
 # Run all tests in parallel
-python run_tests.py
+ajentify-test
 
 # Run a single test by name
-python run_tests.py --test property_lookup
+ajentify-test --test property_lookup
 
 # Specify a custom tests directory
-python run_tests.py --tests-dir path/to/my/tests
+ajentify-test --tests-dir path/to/my/tests
 ```
+
+The legacy `python run_tests.py` entry point still works if you're running from the framework source.
 
 Results are printed to the console and saved as a markdown report in `results/`.
 
@@ -242,23 +292,16 @@ Results are printed to the console and saved as a markdown report in `results/`.
 
 Access any env var in tests with `session.env("MY_VAR")`.
 
-## Project Structure
+## Project Structure (when using pip)
 
 ```
-ajentify-testing/
-  ajentify_testing/        # Framework package
-    __init__.py            # Public API
-    client.py              # Ajentify HTTP client
-    session.py             # TestSession (end_test tool, config)
-    sim_agent.py           # SimAgent
-    target_context.py      # TargetContext with assert_*/assess_*/extract
-    conversation.py        # run_conversation()
-    models.py              # TestResult, CheckResult
-    params.py              # Param helper for parameter definitions
-    exceptions.py          # AssertionFailed, AssessmentFailed
-    runner.py              # Discovery, parallel execution, reporting
-  tests/                   # Your test files
-    test_example.py        # Example test
-  results/                 # Generated markdown reports
-  run_tests.py             # CLI entry point
+your-project/
+  tests/                     # Your test files (committed to your repo)
+    __init__.py
+    test_example.py
+  ajentify_prompts.py        # Optional prompt overrides
+  .env                       # Credentials (gitignored)
+  .env.example               # Credential template
+  requirements.txt           # includes ajentify-testing
+  results/                   # Generated markdown reports (gitignored)
 ```
