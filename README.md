@@ -283,6 +283,8 @@ The legacy `python run_tests.py` entry point still works if you're running from 
 
 Results are printed to the console and saved as a markdown report in `results/`.
 
+> **Tip:** Add `.env` and `results/` to your `.gitignore` to keep credentials and test output out of version control.
+
 ## Environment Variables
 
 | Variable | Required | Description |
