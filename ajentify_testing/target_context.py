@@ -5,21 +5,23 @@ from typing import Optional, TYPE_CHECKING
 
 from ajentify_testing.models import CheckResult, CheckType, CheckStatus
 from ajentify_testing.exceptions import AssertionFailed, AssessmentFailed, TestFailure
-from ajentify_testing.params import Param
+from ajentify_testing.params import Param, _build_object_schema
 from ajentify_testing import prompts as _prompts
 
 if TYPE_CHECKING:
     from ajentify_testing.session import TestSession
 
-BOOLEAN_PARAMS = [
+# Pre-built JSON Schemas for the boolean / score assessor calls. Compiled
+# once because the property set never changes between invocations.
+BOOLEAN_SCHEMA = _build_object_schema([
     Param.boolean("result", "Whether the statement is true"),
     Param.string("reasoning", "Explanation of why the statement is true or false"),
-]
+])
 
-SCORE_PARAMS = [
+SCORE_SCHEMA = _build_object_schema([
     Param.number("score", "Score from 0.0 to 1.0"),
     Param.string("reasoning", "Explanation of the score"),
-]
+])
 
 
 # ── Check descriptor classes (for check_all) ─────────────────────
@@ -339,7 +341,7 @@ class TargetContext:
         prompt = _prompts.BOOLEAN_ASSESSOR_PROMPT.format(
             conversation=conversation_text, statement=statement,
         )
-        result = self.client.run_sre_inline(prompt, BOOLEAN_PARAMS)
+        result = self.client.run_sre_inline(prompt, BOOLEAN_SCHEMA)
 
         is_true = result.get("result", False)
         reasoning = result.get("reasoning", "")
@@ -365,7 +367,7 @@ class TargetContext:
         prompt = _prompts.BOOLEAN_ASSESSOR_PROMPT.format(
             conversation=conversation_text, statement=statement,
         )
-        result = self.client.run_sre_inline(prompt, BOOLEAN_PARAMS)
+        result = self.client.run_sre_inline(prompt, BOOLEAN_SCHEMA)
 
         is_true = result.get("result", False)
         reasoning = result.get("reasoning", "")
@@ -396,7 +398,7 @@ class TargetContext:
         prompt = _prompts.SCORE_ASSESSOR_PROMPT.format(
             conversation=conversation_text, criteria=criteria,
         )
-        result = self.client.run_sre_inline(prompt, SCORE_PARAMS)
+        result = self.client.run_sre_inline(prompt, SCORE_SCHEMA)
 
         score = float(result.get("score", 0.0))
         reasoning = result.get("reasoning", "")
@@ -439,11 +441,6 @@ class TargetContext:
         self._ensure_transcript()
         conversation_text = self.get_transcript_text()
 
-        _RESULT_ENUM = [
-            {"name": "PASS", "description": "The assertion passed", "type": "string"},
-            {"name": "FAIL", "description": "The assertion failed", "type": "string"},
-        ]
-
         assertion_lines: list[str] = []
         parameters: list[dict] = []
 
@@ -464,32 +461,30 @@ class TargetContext:
                 )
 
             assertion_lines.append(line)
-            parameters.append({
-                "name": f"assertion_{n}",
-                "description": obj_desc,
-                "type": "object",
-                "parameters": [
-                    {
-                        "name": "result",
-                        "description": "PASS if the assertion passed, FAIL if it did not",
-                        "type": "enum",
-                        "parameters": _RESULT_ENUM,
-                    },
-                    {
-                        "name": "reasoning",
-                        "description": "Explanation of why this assertion passed or failed",
-                        "type": "string",
-                        "parameters": [],
-                    },
+            # One nested object per assertion so the LLM returns
+            # { "assertion_1": {"result": "PASS", "reasoning": "..."}, ... }.
+            parameters.append(Param.object(
+                name=f"assertion_{n}",
+                description=obj_desc,
+                children=[
+                    Param.enum(
+                        "result",
+                        "PASS if the assertion passed, FAIL if it did not",
+                        values=["PASS", "FAIL"],
+                    ),
+                    Param.string(
+                        "reasoning",
+                        "Explanation of why this assertion passed or failed",
+                    ),
                 ],
-            })
+            ))
 
         prompt = _prompts.ASSESS_ALL_PROMPT_TEMPLATE.format(
             assertions="\n".join(assertion_lines),
             conversation=conversation_text,
         )
 
-        result = self.client.run_sre_inline(prompt, parameters)
+        result = self.client.run_sre_inline(prompt, _build_object_schema(parameters))
 
         failures: list[str] = []
         for i, check in enumerate(checks):
@@ -666,7 +661,7 @@ class TargetContext:
         prompt = _prompts.BOOLEAN_ASSESSOR_PROMPT.format(
             conversation=conversation_text, statement=statement,
         )
-        result = self.client.run_sre_inline(prompt, BOOLEAN_PARAMS)
+        result = self.client.run_sre_inline(prompt, BOOLEAN_SCHEMA)
         is_true = result.get("result", False)
         reasoning = result.get("reasoning", "")
 
@@ -689,7 +684,7 @@ class TargetContext:
         prompt = _prompts.SCORE_ASSESSOR_PROMPT.format(
             conversation=conversation_text, criteria=criteria,
         )
-        result = self.client.run_sre_inline(prompt, SCORE_PARAMS)
+        result = self.client.run_sre_inline(prompt, SCORE_SCHEMA)
         score = float(result.get("score", 0.0))
         reasoning = result.get("reasoning", "")
 
@@ -728,7 +723,7 @@ class TargetContext:
         else:
             full_prompt = prompt.format(conversation=conversation_text)
 
-        return self.client.run_sre_inline(full_prompt, parameters)
+        return self.client.run_sre_inline(full_prompt, _build_object_schema(parameters))
 
     # ── Cleanup ─────────────────────────────────────────────────
 

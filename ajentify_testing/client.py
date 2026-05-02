@@ -107,8 +107,13 @@ class AjentifyClient:
 
     # ── Parameter Definitions ───────────────────────────────────
 
-    def create_pd(self, parameters: list[dict]) -> dict:
-        return self._post("/parameter-definition", {"parameters": parameters})
+    def create_pd(self, schema: dict) -> dict:
+        """Create a Parameter Definition from a JSON Schema (Draft 2020-12).
+
+        Build the schema with :func:`ajentify_testing.params._build_object_schema`
+        on top of `Param.*` fragments, or pass a hand-rolled schema dict.
+        """
+        return self._post("/parameter-definition", {"schema": schema})
 
     def delete_pd(self, pd_id: str) -> dict:
         return self._delete(f"/parameter-definition/{pd_id}")
@@ -148,20 +153,41 @@ class AjentifyClient:
         prompt_template: str,
         *,
         is_public: bool = False,
+        variable_names: Optional[list[str]] = None,
+        model_id: Optional[str] = None,
     ) -> dict:
-        return self._post("/sre", {
+        """Create a Structured Response Endpoint.
+
+        ``variable_names`` is the new-style template substitution: pass the
+        explicit list of tokens that appear verbatim in ``prompt_template``
+        (e.g. ``["{{conversation}}"]``). The backend does direct string
+        replacement at run time. Omit it to fall back to the legacy
+        ``{variable}`` regex placeholder behavior.
+        """
+        body: dict = {
             "name": name,
             "description": description,
             "pd_id": pd_id,
             "prompt_template": prompt_template,
             "is_public": is_public,
-        })
+        }
+        if variable_names is not None:
+            body["variable_names"] = variable_names
+        if model_id is not None:
+            body["model_id"] = model_id
+        return self._post("/sre", body)
 
     def run_sre(self, sre_id: str, args: dict) -> dict:
         return self._post(f"/run-sre/{sre_id}", args)
 
-    def run_sre_inline(self, prompt: str, parameters: list[dict], model: str | None = None) -> dict:
-        body: dict = {"prompt": prompt, "parameters": parameters}
+    def run_sre_inline(self, prompt: str, schema: dict, model: Optional[str] = None) -> dict:
+        """Run a one-off structured extraction.
+
+        ``schema`` must be a complete JSON Schema (Draft 2020-12) describing the
+        desired output object — typically built via
+        :func:`ajentify_testing.params._build_object_schema`.
+        """
+        body: dict = {"prompt": prompt, "schema": schema}
         if model:
             body["model"] = model
         return self._post("/run-sre", body)

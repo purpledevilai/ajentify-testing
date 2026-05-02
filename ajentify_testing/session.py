@@ -4,6 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from ajentify_testing.client import AjentifyClient
 from ajentify_testing import prompts as _prompts
+from ajentify_testing.params import Param, _build_object_schema
 
 
 class TestSession:
@@ -60,13 +61,12 @@ class TestSession:
         print("Session ready.\n")
 
     def _create_end_test_tool(self):
-        pd = self.client.create_pd(parameters=[
-            {
-                "name": "summary",
-                "description": _prompts.END_TEST_SUMMARY_PARAM_DESCRIPTION,
-                "type": "string",
-            },
+        # The backend now stores PDs as JSON Schema, so build the schema from
+        # `Param` fragments rather than the legacy parameters tree.
+        schema = _build_object_schema([
+            Param.string("summary", _prompts.END_TEST_SUMMARY_PARAM_DESCRIPTION),
         ])
+        pd = self.client.create_pd(schema=schema)
         self._track("pd", pd["pd_id"])
 
         tool = self.client.create_tool(
